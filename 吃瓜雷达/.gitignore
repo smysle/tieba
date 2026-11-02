@@ -1,0 +1,9 @@
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/guatan.log
+data/server.out
+data/covers/*.png
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>瓜田雷达 · 贴吧吃瓜监控台</title>
+<meta name="description" content="贴吧吃瓜监控台：盯帖、抓楼层、看反转、一键生成吃瓜日报">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8D%89%3C/text%3E%3C/svg%3E">
+<meta name="theme-color" content="#fdfaf8">
+<meta name="color-scheme" content="light">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">🍉</div>
+    <div class="brand-text">
+      <h1>瓜田雷达</h1>
+      <p>贴吧吃瓜监控台 · 新楼层实时进站 · 一键切瓜</p>
+    </div>
+  </div>
+  <div class="statusline">
+    <span id="monitor-pill" class="pill"><i></i><span>连接中</span></span>
+    <span id="uptime" class="muted small"></span>
+    <div id="stats" class="stat-chips"></div>
+  </div>
+  <div class="top-actions">
+    <button id="btn-refresh" class="btn ghost" title="刷新数据">↻ 刷新</button>
+    <button id="btn-settings" class="btn">⚙ 设置</button>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- ------------------------------------------------ 左：监控源 -->
+  <aside class="rail panel">
+    <div class="panel-head">
+      <h2>监控源</h2>
+      <span id="source-count" class="badge">0</span>
+    </div>
+
+    <div class="add-box">
+      <div class="seg" id="kind-seg">
+        <button class="seg-btn active" data-kind="thread">盯帖</button>
+        <button class="seg-btn" data-kind="forum">盯吧</button>
+        <button class="seg-btn" data-kind="hot">热榜</button>
+      </div>
+      <input id="add-key" class="input" autocomplete="off"
+             placeholder="贴吧链接 / tid / 吧名">
+      <div class="add-row">
+        <select id="add-interval" class="input small">
+          <option value="60">每 1 分钟</option>
+          <option value="120" selected>每 2 分钟</option>
+          <option value="300">每 5 分钟</option>
+          <option value="900">每 15 分钟</option>
+        </select>
+        <button id="btn-add" class="btn primary">添加</button>
+      </div>
+      <p class="hint">示例：<code>https://tieba.baidu.com/p/11154226751</code></p>
+      <button id="btn-forum" class="btn ghost small wide-ghost">📚 批量扒一个吧</button>
+    </div>
+
+    <div id="sources" class="sources"></div>
+    <div id="sources-empty" class="empty small-empty">
+      <div class="empty-emoji">🌱</div>
+      <p>还没有在盯的瓜。<br>贴个帖子链接进来，第一次会全量抓楼层。</p>
+    </div>
+  </aside>
+
+  <!-- ------------------------------------------------ 中：楼层流 -->
+  <section class="center panel">
+    <div id="thread-empty" class="empty big-empty">
+      <div class="empty-emoji">🍉</div>
+      <h2>选一个瓜，或者先添加一个</h2>
+      <p>左边贴链接 → 自动抓楼层 → 右边选个模板 → 出锅。</p>
+      <p class="muted small">首次全量抓取一个 400 楼的帖子大约需要 10–20 秒。</p>
+    </div>
+
+    <div id="thread-view" class="thread-view hidden">
+      <div class="thread-head">
+        <div class="thread-title-row">
+          <h2 id="thread-title">—</h2>
+          <a id="thread-link" class="icon-link" href="#" target="_blank" rel="noreferrer"
+             title="打开原帖">↗</a>
+        </div>
+        <div id="thread-meta" class="thread-meta"></div>
+        <div class="thread-actions">
+          <button id="btn-poll" class="btn ghost small">立即抓一次</button>
+          <button id="btn-vision" class="btn ghost small">识图</button>
+          <button id="btn-new-floors" class="btn small accent hidden">有 0 条新楼层 · 刷新</button>
+        </div>
+      </div>
+
+      <div class="tabs" id="tabs">
+        <button class="tab active" data-mode="all">全部楼层</button>
+        <button class="tab" data-mode="op">只看楼主</button>
+        <button class="tab" data-mode="hot">高能</button>
+        <button class="tab" data-mode="starred">我标的瓜点</button>
+      </div>
+
+      <div class="filters">
+        <input id="search" class="input" placeholder="搜楼层内容 / 用户名，回车过滤">
+        <span id="floor-count" class="muted small"></span>
+      </div>
+
+      <div id="floors" class="floors"></div>
+      <div id="load-more-wrap" class="load-more hidden">
+        <button id="btn-load-more" class="btn ghost">加载更多</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ 右：切瓜 + 事件 -->
+  <aside class="right">
+    <div class="panel workshop">
+      <div class="panel-head">
+        <h2>切瓜工坊</h2>
+        <span id="llm-badge" class="badge ghost-badge">本地规则</span>
+      </div>
+      <p class="hint">选模板 → 生成 → 报告页可直接截图 / 存长图。</p>
+      <div id="modes" class="modes"></div>
+
+      <label class="checkline">
+        <input type="checkbox" id="neutral">
+        <span>中立模式：不站队，只陈述事实与各方说法</span>
+      </label>
+      <textarea id="extra-note" class="input" rows="2"
+                placeholder="额外要求（可选）：比如「重点看 200 楼之后的交锋」"></textarea>
+
+      <button id="btn-summarize" class="btn primary wide">🍉 生成吃瓜报告</button>
+      <div id="job-box" class="job-box hidden">
+        <div class="job-title"><span class="spinner"></span><span id="job-status">生成中…</span></div>
+        <div id="job-logs" class="job-logs"></div>
+      </div>
+
+      <div class="panel-sub">
+        <h3>历史报告</h3>
+        <div id="report-list" class="report-list"></div>
+        <p id="report-empty" class="hint">这个帖还没有报告。</p>
+      </div>
+    </div>
+
+    <div class="panel stories-panel">
+      <div class="panel-head">
+        <h2>瓜事件</h2>
+        <button id="btn-build-stories" class="btn ghost small">重新聚类</button>
+      </div>
+      <p class="hint">把「主贴 / 回应 / 跟风」按参与者、时间、关键词合并成一条时间线。</p>
+      <div id="story-list" class="story-list"></div>
+      <p id="story-empty" class="hint">还没有合并出事件。点「重新聚类」试试。</p>
+    </div>
+
+    <div class="panel events">
+      <div class="panel-head">
+        <h2>事件流</h2>
+        <span class="badge ghost-badge">实时</span>
+      </div>
+      <div id="events" class="event-list"></div>
+      <p id="events-empty" class="hint">还没有事件。等监控跑一轮。</p>
+    </div>
+  </aside>
+</main>
+
+<!-- ------------------------------------------------ 报告弹窗 -->
+<div id="modal-report" class="modal hidden">
+  <div class="modal-panel report-panel">
+    <div class="modal-head">
+      <div class="modal-title">
+        <strong id="report-title">吃瓜报告</strong>
+        <span id="report-sub" class="muted small"></span>
+      </div>
+      <div class="modal-actions">
+        <a id="report-open" class="btn ghost small" target="_blank" rel="noreferrer">新窗口打开</a>
+        <a id="report-download" class="btn ghost small">下载 .md</a>
+        <button id="report-close" class="btn small">关闭</button>
+      </div>
+    </div>
+    <iframe id="report-frame" class="report-frame" title="吃瓜报告"></iframe>
+  </div>
+</div>
+
+<!-- ------------------------------------------------ 设置弹窗 -->
+<div id="modal-settings" class="modal hidden">
+  <div class="modal-panel settings-panel">
+    <div class="modal-head">
+      <div class="modal-title"><strong>设置</strong>
+        <span class="muted small">只存在本机 data/guatan.db，不上传</span></div>
+      <div class="modal-actions">
+        <button id="settings-close" class="btn small">关闭</button>
+      </div>
+    </div>
+
+    <div class="settings-body">
+      <section class="settings-sec">
+        <h3>切瓜模型（可选）</h3>
+        <p class="hint">不配也能用：默认走本地规则引擎。配了会更像人写。也支持本机 <code>claude</code> CLI。</p>
+        <div class="grid2">
+          <label>预设
+            <select id="cfg-llm-preset" class="input">
+              <option value="">— 手动填写 —</option>
+            </select>
+          </label>
+          <label>类型
+            <select id="cfg-llm-type" class="input">
+              <option value="openai">OpenAI 兼容</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="cli">本机 CLI</option>
+            </select>
+          </label>
+          <label>Base URL
+            <input id="cfg-llm-base" class="input" placeholder="https://api.deepseek.com">
+          </label>
+          <label>模型
+            <input id="cfg-llm-model" class="input" placeholder="deepseek-chat">
+          </label>
+          <label>API Key
+            <input id="cfg-llm-key" class="input" type="password" placeholder="留空 = 不修改">
+          </label>
+          <label>CLI 命令（type=cli 时用）
+            <input id="cfg-llm-cmd" class="input" placeholder="claude -p">
+          </label>
+        </div>
+        <div class="row-actions">
+          <button id="btn-test-llm" class="btn ghost small">测试连通性</button>
+          <span id="llm-test" class="muted small"></span>
+        </div>
+      </section>
+
+      <section class="settings-sec">
+        <h3>贴吧登录态（可选）</h3>
+        <p class="hint">匿名也能抓（r=1 倒序可翻到底）。遇到「登录后查看全部」或抓不全时，填 BDUSS。</p>
+        <div class="grid2">
+          <label>BDUSS
+            <input id="cfg-cookie" class="input" type="password" placeholder="留空 = 不修改">
+          </label>
+          <label>请求间隔（秒）
+            <input id="cfg-delay" class="input" type="number" step="0.05" min="0" max="3" value="0.35">
+          </label>
+        </div>
+        <p id="cookie-state" class="hint"></p>
+      </section>
+
+      <section class="settings-sec">
+        <h3>监控</h3>
+        <div class="grid2">
+          <label>首次全量最多抓多少页
+            <input id="cfg-max-pages" class="input" type="number" min="5" max="200" value="40">
+          </label>
+          <label>瓜点关键词（逗号分隔）
+            <input id="cfg-keywords" class="input" placeholder="反转,实锤,打脸,道歉">
+          </label>
+        </div>
+      </section>
+
+      <section class="settings-sec">
+        <h3>多模态识图（可选，但强烈建议）</h3>
+        <p class="hint">OpenAI 兼容 / Anthropic / 本机 CLI。没配就走 macOS Vision OCR 兜底；CLI 用 <code>claude -p</code> 时会把图片路径交给它读。</p>
+        <div class="grid2">
+          <label>类型
+            <select id="cfg-vision-type" class="input">
+              <option value="openai">OpenAI 兼容</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="cli">本机 CLI</option>
+            </select>
+          </label>
+          <label>模型
+            <input id="cfg-vision-model" class="input" placeholder="gpt-4o-mini / claude-cli">
+          </label>
+          <label>Base URL
+            <input id="cfg-vision-base" class="input" placeholder="https://api.openai.com/v1">
+          </label>
+          <label>API Key
+            <input id="cfg-vision-key" class="input" type="password" placeholder="留空 = 不修改">
+          </label>
+          <label>CLI 命令（type=cli）
+            <input id="cfg-vision-cmd" class="input" placeholder="claude -p">
+          </label>
+        </div>
+        <label class="checkline"><input type="checkbox" id="cfg-vision-enabled">
+          <span>启用识图（关掉则只下载图片不识别）</span></label>
+      </section>
+
+      <section class="settings-sec">
+        <h3>封面生图（可选）</h3>
+        <p class="hint">OpenAI 兼容的 <code>/images/generations</code>。不填就用本地 SVG 封面。</p>
+        <div class="grid2">
+          <label>Base URL
+            <input id="cfg-img-base" class="input" placeholder="https://api.openai.com/v1">
+          </label>
+          <label>模型
+            <input id="cfg-img-model" class="input" placeholder="gpt-image-1">
+          </label>
+          <label>API Key
+            <input id="cfg-img-key" class="input" type="password" placeholder="留空 = 不修改">
+          </label>
+          <label>尺寸
+            <input id="cfg-img-size" class="input" placeholder="1024x1024">
+          </label>
+        </div>
+        <label class="checkline"><input type="checkbox" id="cfg-img-enabled">
+          <span>启用生图封面</span></label>
+      </section>
+    </div>
+
+    <div class="settings-foot">
+      <span class="muted small">配置写入本地 SQLite；API Key 只回显尾号。</span>
+      <button id="btn-save-config" class="btn primary">保存设置</button>
+    </div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------ 热榜弹窗 -->
+<div id="modal-hot" class="modal hidden">
+  <div class="modal-panel hot-panel">
+    <div class="modal-head">
+      <div class="modal-title"><strong>贴吧热榜</strong>
+        <span id="hot-updated" class="muted small"></span></div>
+      <div class="modal-actions">
+        <button id="hot-close" class="btn small">关闭</button>
+      </div>
+    </div>
+    <div id="hot-list" class="hot-list"></div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------ 图片灯箱 -->
+<div id="modal-media" class="modal hidden">
+  <div class="modal-panel media-panel">
+    <div class="modal-head">
+      <div class="modal-title"><strong id="media-title">图片</strong>
+        <span id="media-sub" class="muted small"></span></div>
+      <div class="modal-actions"><button id="media-close" class="btn small">关闭</button></div>
+    </div>
+    <div class="media-body">
+      <img id="media-img" alt="帖子图片">
+      <div id="media-analysis" class="media-analysis"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------ 事件弹窗 -->
+<div id="modal-story" class="modal hidden">
+  <div class="modal-panel story-panel">
+    <div class="modal-head">
+      <div class="modal-title"><strong id="story-title">事件</strong>
+        <span id="story-sub" class="muted small"></span></div>
+      <div class="modal-actions">
+        <button id="story-summarize" class="btn primary small">生成合并报告</button>
+        <button id="story-close" class="btn small">关闭</button>
+      </div>
+    </div>
+    <div class="story-body">
+      <div id="story-threads" class="story-threads"></div>
+      <div id="story-timeline" class="story-timeline"></div>
+      <div class="panel-sub">
+        <h3>事件报告</h3>
+        <div id="story-report-list" class="report-list"></div>
+        <p id="story-report-empty" class="hint">还没有事件报告，点右上角「生成合并报告」。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------ 扒吧弹窗 -->
+<div id="modal-forum" class="modal hidden">
+  <div class="modal-panel forum-panel">
+    <div class="modal-head">
+      <div class="modal-title"><strong>批量扒吧</strong>
+        <span class="muted small">拉吧列表 → 按回复数挑帖 → 抓详情 → 自动聚类</span></div>
+      <div class="modal-actions"><button id="forum-close" class="btn small">关闭</button></div>
+    </div>
+    <div class="forum-body">
+      <div class="grid2">
+        <label>吧名<input id="forum-kw" class="input" placeholder="比如 nba"></label>
+        <label>翻几页（30 帖/页）<input id="forum-pages" class="input" type="number" value="2" min="1" max="10"></label>
+        <label>标题关键词（可选）<input id="forum-keyword" class="input" placeholder="比如 吃瓜"></label>
+        <label>最少回复数<input id="forum-min" class="input" type="number" value="20"></label>
+        <label>最多抓几贴<input id="forum-limit" class="input" type="number" value="3" min="1" max="10"></label>
+      </div>
+      <button id="forum-start" class="btn primary wide">开始扒</button>
+      <div id="forum-log" class="job-logs forum-log"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
